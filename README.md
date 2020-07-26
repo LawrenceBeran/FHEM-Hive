@@ -15,9 +15,8 @@ Perl dependant components:
 
 
 To add HIVE to your FHEM instance:
-```javascript
-define MyHiveHub Hive_Hub <Hive username> <Hive password>
-```
+
+	define MyHiveHub Hive_Hub <Hive username> <Hive password>
 
 Once successfully connected to Hive it will automatically create the supported devices within your FHEM configuration.
 
@@ -56,15 +55,15 @@ FHEM Functions supported:
     SET <name> waterweekprofile [<weekday> <state>,<until>,<state>,<until>,<state>,<until>] [<repeat>]
 ```
       Where <weekday>: Mon, Tue, Wed, Thu, Fri, Sat, Sun
-		  Where <until>: eg. 0:00, 18:00, 23:30
-		  Where <state>: On, Off
+      Where <until>: eg. 0:00, 18:00, 23:30
+      Where <state>: On, Off
   - heatingprofile
 ```javascript 
     SET <name> heatingweekprofile [<weekday> <temp>,<until>,<temp>,<until>,<temp>,<until>] [<repeat>]
 ```
-		  Where <weekday>: Mon, Tue, Wed, Thu, Fri, Sat, Sun
-		  Where <until>: eg. 8:00, 18:00, 23:30
-		  Where <temp>: eg. 17.5, 21
+      Where <weekday>: Mon, Tue, Wed, Thu, Fri, Sat, Sun
+      Where <until>: eg. 8:00, 18:00, 23:30
+      Where <temp>: eg. 17.5, 21
   
 Has a load of internals for information about the attached devices.
 
