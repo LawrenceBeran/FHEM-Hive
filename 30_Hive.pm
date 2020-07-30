@@ -55,8 +55,7 @@ sub Hive_Define($$)
 		return $msg;
 	}
 
-	Log(5, "Hive_Define id $id ");
-
+	Log(3, "Hive_Define id $id ");
 	$hash->{id} 	= $id;
 	$hash->{type}	= $hiveType;
 	$hash->{STATE} = 'Disconnected';
@@ -65,6 +64,20 @@ sub Hive_Define($$)
 
 	# Tell this Hive device to point to its parent Hive_Hub
 	AssignIoPort($hash);
+
+	#
+	# The logic is a bit screwed up here...
+	# To get the devices internals set so that the Set command works we need to ensure the following are called
+	#	- Hive_Hub_Initialise
+	#	- Hive_Hub_Define (physical device - doesnt set any internals)
+	#	- Hive_Initialise (node)
+	#	- Hive_Define
+	#	-   Calls Hive_Hub_UpdateNodes
+	#	-		Calls Dispatch for each node which calls --> Hive_Parse
+	# Hive_HubUpdateNodes gets all nodes details even if they havent been defined yet, this causes autocreate requests
+	# which in turn cause cannot autocreate as the device already exists.
+	# So added a parameter to Hive_Hub_UpdateNodes which triggers whether to call Dispatch if the node exists (has been defined yet)
+	#
 
 	# Need to call Hive_Hub_UpdateNodes....
 	($hash->{IODev}{InitNode})->($hash->{IODev}, 1);
@@ -203,7 +216,7 @@ sub Hive_Set($@)
 			return "unknown argument $cmd choose one of heating holiday frostprotecttemperature heatingprofile";
 		}
 	}
-	
+
 	Log(5, "Hive_Set: exit");
 
 	return undef;
