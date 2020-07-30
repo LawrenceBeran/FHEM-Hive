@@ -16,34 +16,117 @@ sub Hive_Initialize($)
 {
 	my ($hash) = @_;
 
+	Log(5, "Hive_Initialize: enter");
+
+
+	# Provider
+
+	# Consumer
 	$hash->{DefFn}		= "Hive_Define";
 	$hash->{SetFn}    	= "Hive_Set";	
 	$hash->{ParseFn}	= "Hive_Parse";
 	$hash->{Match}		= ".*";
 	$hash->{AttrList}	= "IODev " . $readingFnAttributes;
 
+	Log(5, "Hive_Initialize: exit");
+
 	return undef;
 }
 
 sub Hive_CheckIODev($)
 {
-  my $hash = shift;
-  return !defined($hash->{IODev}) || ($hash->{IODev}{TYPE} ne "Hive_Hub");
+	my $hash = shift;
+	return !defined($hash->{IODev}) || ($hash->{IODev}{TYPE} ne "Hive_Hub");
 }
+
+sub Hive_Define($$)
+{
+	my ($hash, $def) = @_;
+
+	Log(5, "Hive_Define: enter");
+
+	my ($name, $type, $hiveType, $id) = split("[ \t][ \t]*", $def);
+	$id = lc($id); # nomalise id
+
+	if (exists($modules{Hive}{defptr}{$id})) 
+	{
+		my $msg = "Hive_Define: Device with id $id is already defined";
+		Log(1, "$msg");
+		return $msg;
+	}
+
+	Log(5, "Hive_Define id $id ");
+
+	$hash->{id} 	= $id;
+	$hash->{type}	= $hiveType;
+	$hash->{STATE} = 'Disconnected';
+	
+	$modules{Hive}{defptr}{$id} = $hash;
+
+	# Tell this Hive device to point to its parent Hive_Hub
+	AssignIoPort($hash);
+
+	# Need to call Hive_Hub_UpdateNodes....
+	($hash->{IODev}{InitNode})->($hash->{IODev}, 1);
+
+	Log(5, "Hive_Define: exit");
+
+	return undef;
+}
+
+sub Hive_Undefine($$)
+{
+	my ($hash,$arg) = @_;
+
+	Log(5, "Hive_Undefine: enter");
+
+	delete($modules{Hive}{defptr}{$hash->{id}});
+	
+	Log(5, "Hive_Undefine: exit");
+
+	return undef;
+}
+
 
 sub Hive_Set($@)
 {
 	my ($hash,$name,$cmd,@args) = @_;
 
+	Log(5, "Hive_Set: enter");
+
 	return "Invalid IODev" if (Hive_CheckIODev($hash));	
 	
-	Log(3, "Hive_Set: Name: $name, Cmd: $cmd");
+	Log(5, "Hive_Set: Name: $name, Cmd: $cmd");
 
 	my $command   = undef;
 	my $cmd_state = undef;
 
-	if (lc $cmd eq 'heating') {
-	
+	#
+	# This call is dependant on $hash->{heatingId}, $hash->{hotWaterId} & $hash->{id} being defined
+	# These are internals that only get set during the call to Hive_Hub_UpdateNodes which is called on a timer initialised from Hive_Hub_Define
+	#	They need to be set during Hive_Define
+	# We need to get a way where these details can be loaded in advance of Hive_Set being called.
+	# The devices (thermostat and thermostatUI) have been defined 
+	#
+	#	Hive seperates the hardware devices like so:
+	#		Hub - 
+	#		HeatingReceiver - switches
+	#		HeatingThermostat - UI, physical controls
+	#
+	#	But logicaly the heating and hot water functions are seperate
+	#
+	#	The devices could be seperated into their own logical components
+	#		Hive being the physical module (communicates with the Hive API)
+	#		HiveHub - logical module (for physical Hub component details, holiday mode etc)
+	#		HiveHeatingReceiverHeating - logical module (for heating controls)
+	#		HiveHeatingReceiverHotWater - logical module (for hot water controls)
+	#		HiveThermostatUI - logical module (for thermostat)	#
+	#
+	#  It may cause problems with the HeatingReceiver to be split as they may need to share data/responsabilities
+	#
+
+	if (lc $cmd eq 'heating') 
+	{
 		#	Put heating on to manual
 		#	SET <name> HEATING <temp>	
 			
@@ -57,9 +140,9 @@ sub Hive_Set($@)
 		#	SET <name> HEATING AUTO	
 	
 		return ($hash->{IODev}{Send})->($hash->{IODev}, $hash->{heatingId}, "heating", @args);
-		
-	} elsif (lc $cmd eq 'water') {
-	
+	} 
+	elsif (lc $cmd eq 'water') 
+	{
 		#	Put hot water on to manual
 		#	SET <name> WATER ON	
 			
@@ -73,97 +156,68 @@ sub Hive_Set($@)
 		#	SET <name> WATER AUTO		
 	
 		return ($hash->{IODev}{Send})->($hash->{IODev}, $hash->{hotWaterId}, "water", @args);
-
-	} elsif (lc $cmd eq 'frostprotecttemperature') {
-	
+	} 
+	elsif (lc $cmd eq 'frostprotecttemperature') 
+	{
 		#	set frostprotecttemperature
 		#	SET <name> frostprotecttemperature <temp>	
 
 		return ($hash->{IODev}{Send})->($hash->{IODev}, $hash->{hotWaterId}, "frostprotecttemperature", @args);
-	
-	} elsif (lc $cmd eq 'holiday') {
-
+	} 
+	elsif (lc $cmd eq 'holiday') 
+	{
 		#	set holiday mode
 		#	SET <name> holiday <start day> <start month> <start year> <end day> <end month> <end year> <temp>
 
 		#	set holiday mode off
 		#	SET <name> holiday off
 		
-		
 		return ($hash->{IODev}{Send})->($hash->{IODev}, $hash->{id}, "holiday", @args);
-
-	} elsif (lc $cmd eq 'waterprofile') {
-
+	} 
+	elsif (lc $cmd eq 'waterprofile') 
+	{
 		#	SET <name> waterweekprofile [<weekday> <state>,<until>,<state>,<until>,<state>,<until>] [<repeat>]
 		# 	Where weekday: Mon, Tue, Wed, Thu, Fri, Sat, Sun
 		# 	Where until: eg. 0:00, 18:00, 23:30
 		#	Where state: On, Off
 
 		return ($hash->{IODev}{Send})->($hash->{IODev}, $hash->{hotWaterId}, "waterprofile", @args);
-
-
-	} elsif (lc $cmd eq 'heatingprofile') {
-
+	} 
+	elsif (lc $cmd eq 'heatingprofile') 
+	{
 		#	SET <name> heatingweekprofile [<weekday> <temp>,<until>,<temp>,<until>,<temp>,<until>] [<repeat>]
 		# 	Where weekday: Mon, Tue, Wed, Thu, Fri, Sat, Sun
 		# 	Where until: eg. 8:00, 18:00, 23:30
 		#	Where temp: eg. 17.5, 21
 
 		return ($hash->{IODev}{Send})->($hash->{IODev}, $hash->{heatingId}, "heatingprofile", @args);
-
-	} else {
-		if (exists($hash->{hotWaterId})) {
+	} 
+	else 
+	{
+		if (exists($hash->{hotWaterId})) 
+		{
 			return "unknown argument $cmd choose one of heating water holiday frostprotecttemperature heatingprofile waterprofile";
-		} else {
+		} 
+		else 
+		{
 			return "unknown argument $cmd choose one of heating holiday frostprotecttemperature heatingprofile";
 		}
 	}
 	
+	Log(5, "Hive_Set: exit");
+
 	return undef;
 }
-
-sub Hive_Define($$)
-{
-	my ($hash, $def) = @_;
-
-	my ($name, $type, $hiveType, $id) = split("[ \t][ \t]*", $def);
-	$id = lc($id); # nomalise id
-
-#	if(exists($modules{Hive}{defptr}{$id})) {
-#		my $msg = "Hive_Define: Device with id $id is already defined";
-#		Log(1, "$msg");
-#		return $msg;
-#	}
-
-
-	Log(3, "Hive_Define id $id ");
-	$hash->{id} 	= $id;
-	$hash->{type}	= $hiveType;
-	$hash->{STATE} = 'Disconnected';
-	
-	$modules{Hive}{defptr}{$id} = $hash;
-
-	# Tell this Hive device to point to its parent Hive_Hub
-	AssignIoPort($hash);
-	return undef;
-}
-
-sub Hive_Undefine($$)
-{
-	my ($hash,$arg) = @_;
-
-	delete($modules{Hive}{defptr}{$hash->{id}});
-	
-	return undef;
-}
-
 
 sub Hive_Parse($$$)
 {
 	my ($hash, $msg, $device) = @_;
 	my ($name, $type, $id, $nodeString) = split(",", $msg, 4);
 
-	if (!exists($modules{Hive}{defptr}{$id})) {
+	Log(5, "Hive_Parse: enter");
+
+	if (!exists($modules{Hive}{defptr}{$id})) 
+	{
 		Log(1, "Hive_Parse: Hive $type device doesnt exist: $name");
 		return "UNDEFINED Hive_${name}_${type} Hive ${type} ${id}";
 	}
@@ -173,24 +227,24 @@ sub Hive_Parse($$$)
 
 	# Convert the node details back to JSON.
 	my $node = decode_json($nodeString);
-	
-	if ((lc $type eq lc "thermostatUI" or lc $type eq lc "thermostat")) {
-	
+
+	if ((lc $type eq lc "thermostatUI" or lc $type eq lc "thermostat")) 
+	{
 		readingsBeginUpdate($shash);
 	
-		if (lc $node->{id} eq lc $id) {
-
+		if (lc $node->{id} eq lc $id) 
+		{
 			$shash->{name}				= $node->{name};
 			$shash->{model}				= $node->{attributes}->{model}->{reportedValue};
 			readingsBulkUpdateIfChanged($shash, "presence", $node->{attributes}->{presence}->{reportedValue});
 
 			if (lc $node->{attributes}->{presence}->{reportedValue} ne "absent") {
 			
-				$shash->{powerSupply}			= $node->{attributes}->{powerSupply}->{reportedValue};
+				$shash->{powerSupply}		= $node->{attributes}->{powerSupply}->{reportedValue};
 				$shash->{RSSI}				= $node->{attributes}->{RSSI}->{reportedValue};
 				$shash->{LQI}				= $node->{attributes}->{LQI}->{reportedValue};
-				$shash->{hardwareVersion} 		= $node->{attributes}->{hardwareVersion}->{reportedValue};
-				$shash->{softwareVersion} 		= $node->{attributes}->{softwareVersion}->{reportedValue};
+				$shash->{hardwareVersion} 	= $node->{attributes}->{hardwareVersion}->{reportedValue};
+				$shash->{softwareVersion} 	= $node->{attributes}->{softwareVersion}->{reportedValue};
 				$shash->{lastSeen}			= $node->{attributes}->{lastSeen}->{reportedValue};
 			
 				$shash->{STATE} 			= 'Connected';
@@ -227,19 +281,22 @@ sub Hive_Parse($$$)
 				if (defined($node->{attributes}->{frostProtectTemperature})) {
 					$shash->{frostProtectTemperature} 			= $node->{attributes}->{frostProtectTemperature}->{reportedValue};
 				}
-			} else {
+			} 
+			else 
+			{
 				# Device absent
 			}
 			
 			readingsEndUpdate($shash, 1);				
-			
-		} else {
-		
+		}
+		else 
+		{
 			my @daysofweek = qw(monday tuesday wednesday thursday friday saturday sunday);
 			my $node_type = undef;
 			
 			# The node passed is for either the hot water or heating element of the thermostat 
-			if ($node->{attributes}->{supportsHotWater}->{reportedValue}) {
+			if ($node->{attributes}->{supportsHotWater}->{reportedValue}) 
+			{
 				# Hot water node
 				$node_type = "HotWater";
 
@@ -263,7 +320,9 @@ sub Hive_Parse($$$)
 								
 				readingsEndUpdate($shash, 1);
 				
-			} else {
+			} 
+			else 
+			{
 				# Heating node
 				$node_type = "Heating";
 
@@ -313,7 +372,6 @@ sub Hive_Parse($$$)
 					}
 					$shash->{"${node_type}_WeekProfile_${day}"} = join(' / ', @values);
 				}				
-				
 			
 				readingsEndUpdate($shash, 1);
 			}
@@ -370,6 +428,8 @@ sub Hive_Parse($$$)
 #		Log(1, "Hive_Parse ($type): $device->{name}");
 	}
 	
+	Log(5, "Hive_Parse: exit");
+
 	return $shash->{NAME};
 }
 

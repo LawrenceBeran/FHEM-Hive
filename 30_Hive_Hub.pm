@@ -23,6 +23,9 @@ sub Hive_Hub_Initialize($)
 {
 	my ($hash) = @_;
 
+	Log(5, "Hive_Hub_Initialize: enter");
+
+
 	# Provider
 	$hash->{Clients}  = ":Hive:";
 	my %mc = (
@@ -33,12 +36,15 @@ sub Hive_Hub_Initialize($)
 	$hash->{DefFn}    = "Hive_Hub_Define";
 	$hash->{UndefFn}  = "Hive_Hub_Undefine";
 	
+	Log(5, "Hive_Hub_Initialize: exit");
 	return undef;	
 }
 
 sub Hive_Hub_Define($$)
 {
 	my ($hash, $def) = @_;
+
+	Log(5, "Hive_Hub_Define: enter");
 
 	my ($name, $type, $username, $password) = split(' ', $def);
 
@@ -52,17 +58,22 @@ sub Hive_Hub_Define($$)
 
 	# Interface used by the hubs children to communicate with the physical hub
   	$hash->{Send} = \&Hive_Hub_Send;
-	
+	$hash->{InitNode} = \&Hive_Hub_UpdateNodes;
 	
 	# Create a timer to get object details
 	InternalTimer(gettimeofday()+1, "Hive_Hub_GetUpdate", $hash, 0);
 	
+	Log(5, "Hive_Hub_Define: exit");
+
 	return undef;
 }
 
 sub Hive_Hub_Undefine($$)
 {
 	my ($hash, $def) = @_;
+
+	Log(5, "Hive_Hub_Undefine: enter");
+
 
 	if (defined($hash->{id})) {
 		Log(1, "Hive_Hub_Undefine: $hash->{id}");
@@ -72,6 +83,13 @@ sub Hive_Hub_Undefine($$)
 
 	RemoveInternalTimer($hash);
 
+	# Close the HIVE session 
+	my $hiveClient = HiveRest->new();
+	$hiveClient->logout();
+	$hash->{HIVE}{SessionId} = undef;
+
+	Log(5, "Hive_Hub_Undefine: exit");
+
 	return undef;
 }
 
@@ -80,21 +98,25 @@ sub Hive_Hub_Undefine($$)
 ############################################################################
 
 sub
-Hive_Hub_UpdateNodes($)
+Hive_Hub_UpdateNodes($$)
 {
-	my ($hash) = @_;
+	my ($hash,$fromDefine) = @_;
+
+	Log(5, "Hive_Hub_UpdateNodes: enter");
+
 
 	my $presence = "ABSENT";
 
-	my $hiveClient = HiveRest->new($hash->{username}, $hash->{password});
-	if (!$hiveClient->login()) {
-
+	my $hiveClient = HiveRest->new();
+	$hash->{HIVE}{SessionId} = $hiveClient->connect($hash->{username}, $hash->{password}, $hash->{HIVE}{SessionId});
+	if (!defined($hash->{HIVE}{SessionId})) 
+	{
 		Log(1, "Hive_Hub_UpdateNodes: $hash->{username} failed to logon to Hive");
 		$hash->{STATE} = 'Disconnected';
-		
-	} else {
-	
-		Log(3, "Hive_Hub_UpdateNodes: $hash->{username} succesfully logged on to Hive");
+	} 
+	else 
+	{
+		Log(5, "Hive_Hub_UpdateNodes: $hash->{username} succesfully connected to Hive");
 
 		$hash->{STATE} = "Connected";
 
@@ -119,7 +141,7 @@ Hive_Hub_UpdateNodes($)
 						#		I am assuming for now that there is only a single Hub
 					}
 					last;	
-				}
+				} 
 			}
 			
 			if (!defined($hash->{id})) {
@@ -158,29 +180,40 @@ Hive_Hub_UpdateNodes($)
 					
 						my $nodeString = encode_json($node);
 						# Send the thermostat UI node details to the node!
-						Dispatch($hash, "$node->{name},thermostatUI,$node->{id},$nodeString", undef);
+						if (!defined($fromDefine) || exists($modules{Hive}{defptr}{$node->{id}})) 
+						{
+							Dispatch($hash, "$node->{name},thermostatUI,$node->{id},$nodeString", undef);
+						}
 
 						my $thermostatId = $node->{relationships}->{boundNodes}[0]->{id};
 						
 						# Find the thermostat, heating and hot water nodes associated with the thermostatui
-						foreach my $node1 (@{$node_response->{nodes}}) {
-							if (lc $thermostatId eq lc $node1->{parentNodeId}) {
-								
+						foreach my $node1 (@{$node_response->{nodes}}) 
+						{
+							if (lc $thermostatId eq lc $node1->{parentNodeId}) 
+							{
 								$nodeString = encode_json($node1);
 
-								if ($node1->{attributes}->{supportsHotWater}->{reportedValue}) {
-								
-									Dispatch($hash, "$node->{name},thermostat,$thermostatId,$nodeString", undef);
-
-								} else {
-
-									Dispatch($hash, "$node->{name},thermostat,$thermostatId,$nodeString", undef);
-
+								if ($node1->{attributes}->{supportsHotWater}->{reportedValue}) 
+								{
+									if (!defined($fromDefine) || exists($modules{Hive}{defptr}{$thermostatId})) 
+									{
+										Dispatch($hash, "$node->{name},thermostat,$thermostatId,$nodeString", undef);
+									}
+								} else 
+								{
+									if (!defined($fromDefine) || exists($modules{Hive}{defptr}{$thermostatId})) 
+									{
+										Dispatch($hash, "$node->{name},thermostat,$thermostatId,$nodeString", undef);
+									}
 								}
 							} elsif (lc $thermostatId eq lc $node1->{id}) {
 								# Send the thermostat node details to the node!
 								$nodeString = encode_json($node1);
-								Dispatch($hash, "$node->{name},thermostat,$thermostatId,$nodeString", undef);							
+								if (!defined($fromDefine) || exists($modules{Hive}{defptr}{$thermostatId})) 
+								{
+									Dispatch($hash, "$node->{name},thermostat,$thermostatId,$nodeString", undef);
+								}
 							}
 						}					
 					}			
@@ -188,17 +221,18 @@ Hive_Hub_UpdateNodes($)
 			}
 		}
 
-	        if (!$hiveClient->logout()) {
-			Log(3, "Hive_Hub_UpdateNodes: $hash->{username} logged out");
-	        } else {
-			Log(1, "Hive_Hub_UpdateNodes: $hash->{username} failed to logged out");
-		}
+#        if (!$hiveClient->logout()) {
+#			Log(3, "Hive_Hub_UpdateNodes: $hash->{username} logged out");
+#        } else {
+#			Log(1, "Hive_Hub_UpdateNodes: $hash->{username} failed to logged out");
+#		}
 	}
 
 	readingsBeginUpdate($hash);
 	readingsBulkUpdateIfChanged($hash, "presence", uc $presence);
 	readingsEndUpdate($hash, 1);				
 
+	Log(5, "Hive_Hub_UpdateNodes: exit");
 }
 
 sub 
@@ -206,9 +240,14 @@ Hive_Hub_GetUpdate($)
 {
 	my ($hash) = @_;
 
-	Hive_Hub_UpdateNodes($hash);
+	Log(5, "Hive_Hub_GetUpdate: enter");
+
+	Hive_Hub_UpdateNodes($hash, undef);
 	
 	InternalTimer(gettimeofday()+$hash->{INTERVAL}, "Hive_Hub_GetUpdate", $hash, 0);
+
+	Log(5, "Hive_Hub_GetUpdate: exit");
+
 	return undef;
 }
 
@@ -223,15 +262,21 @@ sub Hive_Hub_Send(@)
 {
 	my ($hash, $dst, $cmd, @args) = @_;
 	
-	my $ret = undef;
-	
-	my $hiveClient = HiveRest->new($hash->{username}, $hash->{password});
-	if (!$hiveClient->login()) {
+	Log(5, "Hive_Hub_Send: enter");
 
+	my $ret = undef;
+
+	Log(5, "Hive_Hub_Send: dst - $dst");
+
+	my $hiveClient = HiveRest->new();
+	$hash->{HIVE}{SessionId} = $hiveClient->connect($hash->{username}, $hash->{password}, $hash->{HIVE}{SessionId});
+	if (!defined($hash->{HIVE}{SessionId}))
+	{
 		Log(1, "Hive_Hub_Send: $hash->{username} failed to logon to Hive");
 		$hash->{STATE} = 'Disconnected';
-		
-	} else {
+	} 
+	else 
+	{
 		# auto:
 		#	activeScheduleLock - false
 		#	activeHeatCoolMode - HEAT
@@ -246,12 +291,13 @@ sub Hive_Hub_Send(@)
 		#	targetHeatTemperature - 1 	?
 	
 	
-		Log(3, "Hive_Hub_Send: $hash->{username} succesfully logged on to Hive");
+		Log(3, "Hive_Hub_Send: $hash->{username} succesfully connected to Hive");
 
 		if (lc $cmd eq 'heating') {
 	
 			return "missing a value" if (@args == 0);
 
+			Log(3, "Hive_Hub_Send: $cmd $args[0]");
 	
 			#
 			# TODO: Report on heating state: Manual, auto or off (using combination of settings below)
@@ -313,9 +359,16 @@ sub Hive_Hub_Send(@)
 			}
 								
 			$ret = $hiveClient->putNodeAttributes($dst, $nodeAttributes);
-			if (!defined($ret) || $ret != 200) {
+			if (!defined($ret))
+			{
+				Log(3, "Hive_Hub_Send: Failed to set heating: ret not defined");
 				$ret = "failed to set heating!";
-			} else {
+			} elsif ($ret != 200) 
+			{
+				Log(3, "Hive_Hub_Send: Failed to set heating: ret $ret");
+				$ret = "failed to set heating!";
+			} else 
+			{
 				$ret = undef;
 			}
 			
@@ -778,17 +831,20 @@ sub Hive_Hub_Send(@)
 		}
 	
 	
-        if (!$hiveClient->logout()) {
-			Log(3, "Hive_Hub_Send: $hash->{username} logged out");
-        } else {
-			Log(1, "Hive_Hub_Send: $hash->{username} failed to logged out");
-		}
+#        if (!$hiveClient->logout()) {
+#			Log(3, "Hive_Hub_Send: $hash->{username} logged out");
+#        } else {
+#			Log(1, "Hive_Hub_Send: $hash->{username} failed to logged out");
+#		}
 	}
 
 	# TODO: signal a refresh of the readings
 	#		Not sure when though as 5 seconds isnt enough for them to be updated
 	InternalTimer(gettimeofday()+2, "Hive_Hub_UpdateNodes", $hash, 0);
 	
+	Log(5, "Hive_Hub_Send: exit");
+
+
 	return undef;
 }
 
