@@ -9,18 +9,12 @@ use Data::Dumper;
 sub new        # constructor, this method makes an object that belongs to class Number
 {
     my $class = shift;          # $_[0] contains the class name
-    my $username = shift;    	# $_[1] contains the username
-    my $password = shift;    	# $_[2] contains the password
-				# it is given by the user as an argument
-				
+
     my $self = {};              # the internal structure we'll use to represent
                                 # the data in our class is a hash reference
     bless( $self, $class );     # make $self an object of class $class
 
-    $self->{username} = $username;    # give $self->{username} the supplied value
-    $self->{password} = $password;    # give $self->{password} the supplied value
-
-    $self->{apiVersion} = '6.4.0';    # API 6.5 is a big change to JSON structure
+    $self->{apiVersion} = '6.4.0';
 
     $self->{client} = REST::Client->new();
     $self->{client}->setHost('https://api-prod.bgchprod.info:443/omnia');
@@ -31,19 +25,28 @@ sub new        # constructor, this method makes an object that belongs to class 
 
 sub _getHeaders {
     my $self = shift;
-    
+    my $sessionId = shift;
+
     my $headers = {
              'Content-Type' => 'application/json'
             , 'Accept' => 'application/vnd.alertme.zoo-'.$self->{apiVersion}.'+json'
             , 'X-Omnia-Client' => 'Hive Web Dashboard'
     };
-    
-    if (defined $self->{sessionId}) {
-        $headers->{'X-Omnia-Access-Token'} = $self->{sessionId};        
+
+    if (defined($sessionId))
+    {
+        $headers->{'X-Omnia-Access-Token'} = $sessionId;
     }
-    
+    else 
+    {
+        if (defined($self->{sessionId})) 
+        {
+            $headers->{'X-Omnia-Access-Token'} = $self->{sessionId};
+        }
+    }
+
 #    $self->_log(5, Dumper($headers));
-    
+
     return $headers;
 }
 
@@ -51,55 +54,100 @@ sub _getHeaders {
 sub _log($$)
 {
     my ( $loglevel, $text ) = @_;
-   
+
     my $xline = (caller(0))[2];
     my $xsubroutine = (caller(1))[3];
     my $sub = (split( ':', $xsubroutine ))[2];
-   
-    main::Log3("Hive", $loglevel, "$sub.$xline $text");
+
+    main::Log3("Hive", $loglevel, "$sub.$xline " . $text);
+}
+
+
+sub connect {
+    my $self = shift;
+    my $userName = shift;
+    my $password = shift;
+    my $sessionId = shift;
+
+    if (defined($sessionId)) 
+    {
+        # Test the provided session to see if it is valid.
+        if (!defined($self->sessionStatus($sessionId)))
+        {
+            # Session has expired. Create a new session.
+            $self->_log(3, "connect: Session has expired. requesting new one.");
+
+            $sessionId = undef;
+        }
+        else
+        {
+            $self->{sessionId} = $sessionId;
+        }
+    }
+    else
+    {
+        # No provided session
+        $self->_log(3, "connect: First time logon (no previous session).");
+    }
+
+    if (!defined($sessionId))
+    {
+        $sessionId = $self->_login($userName, $password);
+        if (defined($self->{sessionId}))
+        {
+            $self->_log(3, "connect: Session created");
+        }
+        else
+        {
+            $self->_log(1, "connect: Failed to logon to Hive to create new session.");
+        }
+    }
+
+    return $sessionId;
 }
 
 
 #############################
 # LOGIN to the Hive REST API
 #############################
-sub login {
+sub _login {
     my $self = shift;
-   
-    if (!defined($self->{sessionId}))
-    {
-        my $sessions = {
-            sessions => [{
-                    username => $self->{username}
-                ,   password => $self->{password}
-                ,   caller => 'WEB'                
-            }]};
-     
-        $self->{client}->POST('/auth/sessions', encode_json($sessions), $self->_getHeaders());
-        
-        if (200 != $self->{client}->responseCode()) {
-            # Failed to connect to API
+    my $username = shift;
+    my $password = shift;
+
+    my $sessions = {
+        sessions => [{
+                username => $username
+            ,   password => $password
+            ,   caller => 'WEB'
+        }]};
+
+    $self->{sessionId} = undef;
+
+    $self->{client}->POST('/auth/sessions', encode_json($sessions), $self->_getHeaders());
+
+    if (200 != $self->{client}->responseCode()) {
+        # Failed to connect to API
             $self->_log(1, "Login: ".$self->{client}->responseContent());
+    } else {
+
+        my $response = from_json($self->{client}->responseContent());
+
+        # Extract the session ID from the response...
+        if (defined $response->{sessions}) {
+
+            $self->{sessionId}        = $response->{sessions}[0]{sessionId};
+            $self->{userId}           = $response->{sessions}[0]{userId};
+            $self->{latestApiVersion} = $response->{sessions}[0]{latestSupportedApiVersion};
+
         } else {
-            
-            my $response = from_json($self->{client}->responseContent());
 
-            # Extract the session ID from the response...
-            if (defined $response->{sessions}) {
-              
-                $self->{sessionId}        = $response->{sessions}[0]{sessionId};
-                $self->{userId}           = $response->{sessions}[0]{userId};
-                $self->{latestApiVersion} = $response->{sessions}[0]{latestSupportedApiVersion};
-
-            } else {
-
-                # An error has occured
-                $self->_log(1, "Login: ".Dumper(from_json($self->{client}->responseContent())));
-                # TODO: break down the error and only report the detail not the JSON
-            }
+            # An error has occured
+            $self->_log(1, "Login: ".Dumper(from_json($self->{client}->responseContent())));
+            # TODO: break down the error and only report the detail not the JSON
         }
     }
-        
+
     # If undef, then failed to connect!
     return $self->{sessionId};
 }
@@ -111,18 +159,30 @@ sub login {
 #############################
 sub sessionStatus {
     my $self = shift;
-   
-    if ($self->{sessionId})
+    my $sessionId = shift;
+
+    if (!defined($sessionId))
     {
-        $self->{client}->GET('/auth/sessions/' . $self->{sessionId}, $self->_getHeaders());
-        if (200 != $self->{client}->responseCode()) {
-             $self->_log(1, "sessionStatus: ".$self->{client}->responseContent());
- 
-        } else {
-            my $response = from_json($self->{client}->responseContent());
-#            $self->_log(3, "sessionStatus: ".Dumper($response));
-         }
+        $sessionId = $self->{sessionId};
     }
+
+    my $response = undef;
+
+    if ($sessionId)
+    {
+        $self->{client}->GET('/auth/sessions/' . $sessionId, $self->_getHeaders($sessionId));
+        if (200 != $self->{client}->responseCode()) 
+        {
+            $self->_log(1, "sessionStatus: ".$self->{client}->responseContent());
+        } 
+        else 
+        {
+            $response = from_json($self->{client}->responseContent());
+#            $self->_log(3, "sessionStatus: ".Dumper($response));
+        }
+    }
+
+    return $response;
 }
 
 ################################
@@ -130,7 +190,7 @@ sub sessionStatus {
 ################################
 sub logout {
     my $self = shift;
-    
+
     if ($self->{sessionId})
     {
         $self->{client}->DELETE('/auth/sessions/' . $self->{sessionId}, $self->_getHeaders());
@@ -141,7 +201,7 @@ sub logout {
             undef $self->{sessionId};
         }
     }
-    
+
     return $self->{sessionId};
 }
 
@@ -265,20 +325,20 @@ sub getHubDetails {
                 
 #                   open(my $fh, ">", "hub_details.json");
 #                   print($fh $self->{client}->responseContent());
-#                   close($fh);                       
+#                   close($fh); 
 
-		    $readings->{presence} = $self->_getReading($node_response->{nodes}[0]->{attributes}->{presence});
-		    if (lc $readings->{presence} ne "ABSENT") {
-			# Readings
-                    	$readings->{devicesState}           = $self->_getReading($node_response->{nodes}[0]->{attributes}->{devicesState});
+		            $readings->{presence} = $self->_getReading($node_response->{nodes}[0]->{attributes}->{presence});
+		            if (lc $readings->{presence} ne "ABSENT") {
+			            # Readings
+                        $readings->{devicesState}           = $self->_getReading($node_response->{nodes}[0]->{attributes}->{devicesState});
 
-                    	# Device attributes
-                    	$readings->{powerSupply}            = $self->_getReading($node_response->{nodes}[0]->{attributes}->{powerSupply});
-                    	$readings->{protocol}               = $self->_getReading($node_response->{nodes}[0]->{attributes}->{protocol});
-                    	$readings->{hardwareVersion}        = $self->_getReading($node_response->{nodes}[0]->{attributes}->{hardwareVersion});
-                    	$readings->{kernelVersion}          = $self->_getReading($node_response->{nodes}[0]->{attributes}->{kernelVersion});
-                    	$readings->{internalIPAddress}      = $self->_getReading($node_response->{nodes}[0]->{attributes}->{internalIPAddress});
-		    }
+                        # Device attributes
+                        $readings->{powerSupply}            = $self->_getReading($node_response->{nodes}[0]->{attributes}->{powerSupply});
+                        $readings->{protocol}               = $self->_getReading($node_response->{nodes}[0]->{attributes}->{protocol});
+                        $readings->{hardwareVersion}        = $self->_getReading($node_response->{nodes}[0]->{attributes}->{hardwareVersion});
+                        $readings->{kernelVersion}          = $self->_getReading($node_response->{nodes}[0]->{attributes}->{kernelVersion});
+                        $readings->{internalIPAddress}      = $self->_getReading($node_response->{nodes}[0]->{attributes}->{internalIPAddress});
+                    }
                 }
             }
         }
@@ -329,6 +389,7 @@ sub getThermostatReadings {
     return $readings;
 }
 
+
 sub getThermostatDetails {
     my $self = shift;
     my $id = shift;
@@ -375,7 +436,7 @@ sub getThermostatDetails {
 
 sub getNodes {
     my $self = shift;
-     
+
     my $node_response = undef;
     
     # Get nodes
@@ -391,8 +452,8 @@ sub getNodes {
 
         if (!$ok) {
             my $err= $@;
-            $self->_log("getNodes: ".$err);
-            $self->_log("getNodes: ".$self->{client}->responseContent());
+            $self->_log(1, "getNodes: ".$err);
+            $self->_log(1, "getNodes: ".$self->{client}->responseContent());
         }
     }
     return $node_response;
@@ -418,7 +479,7 @@ sub getNodeAttributes {
     }
     
     return $attributes;
-} 
+}
 
 
 sub putNodeAttributes {
