@@ -16,7 +16,7 @@ sub Hive_Initialize($)
 {
 	my ($hash) = @_;
 
-	Log(5, "Hive_Initialize: enter");
+	Log(3, "Hive_Initialize: enter");
 
 
 	# Provider
@@ -28,7 +28,7 @@ sub Hive_Initialize($)
 	$hash->{Match}		= ".*";
 	$hash->{AttrList}	= "IODev " . $readingFnAttributes;
 
-	Log(5, "Hive_Initialize: exit");
+	Log(3, "Hive_Initialize: exit");
 
 	return undef;
 }
@@ -43,7 +43,7 @@ sub Hive_Define($$)
 {
 	my ($hash, $def) = @_;
 
-	Log(5, "Hive_Define: enter");
+	Log(3, "Hive_Define: enter");
 
 	my ($name, $type, $hiveType, $id) = split("[ \t][ \t]*", $def);
 	$id = lc($id); # nomalise id
@@ -80,9 +80,14 @@ sub Hive_Define($$)
 	#
 
 	# Need to call Hive_Hub_UpdateNodes....
-	($hash->{IODev}{InitNode})->($hash->{IODev}, 1);
+	if (defined($hash->{IODev}{InitNode}))
+	{
+		($hash->{IODev}{InitNode})->($hash->{IODev}, 1);
+	} else {
+		# TODO: Cant properly define the object!
+	}
 
-	Log(5, "Hive_Define: exit");
+	Log(3, "Hive_Define: exit");
 
 	return undef;
 }
@@ -91,11 +96,11 @@ sub Hive_Undefine($$)
 {
 	my ($hash,$arg) = @_;
 
-	Log(5, "Hive_Undefine: enter");
+	Log(3, "Hive_Undefine: enter");
 
 	delete($modules{Hive}{defptr}{$hash->{id}});
 	
-	Log(5, "Hive_Undefine: exit");
+	Log(3, "Hive_Undefine: exit");
 
 	return undef;
 }
@@ -105,11 +110,11 @@ sub Hive_Set($@)
 {
 	my ($hash,$name,$cmd,@args) = @_;
 
-	Log(5, "Hive_Set: enter");
+	Log(3, "Hive_Set: enter");
 
 	return "Invalid IODev" if (Hive_CheckIODev($hash));	
 	
-	Log(5, "Hive_Set: Name: $name, Cmd: $cmd");
+	Log(3, "Hive_Set: Name: $name, Cmd: $cmd");
 
 	my $command   = undef;
 	my $cmd_state = undef;
@@ -217,7 +222,7 @@ sub Hive_Set($@)
 		}
 	}
 
-	Log(5, "Hive_Set: exit");
+	Log(3, "Hive_Set: exit");
 
 	return undef;
 }
@@ -227,7 +232,7 @@ sub Hive_Parse($$$)
 	my ($hash, $msg, $device) = @_;
 	my ($name, $type, $id, $nodeString) = split(",", $msg, 4);
 
-	Log(5, "Hive_Parse: enter");
+	Log(3, "Hive_Parse: enter");
 
 	if (!exists($modules{Hive}{defptr}{$id})) 
 	{
@@ -441,7 +446,7 @@ sub Hive_Parse($$$)
 #		Log(1, "Hive_Parse ($type): $device->{name}");
 	}
 	
-	Log(5, "Hive_Parse: exit");
+	Log(3, "Hive_Parse: exit");
 
 	return $shash->{NAME};
 }
