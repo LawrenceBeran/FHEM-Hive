@@ -11,6 +11,7 @@ Perl dependant components:
 - REST::Client
 - JSON
 - Math::Round
+- MIME::Base64
 - Data::Dumper (only for logging)
 
 

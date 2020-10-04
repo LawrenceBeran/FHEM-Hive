@@ -5,6 +5,8 @@ use warnings;
 use REST::Client;
 use JSON;
 use Data::Dumper;
+use MIME::Base64;
+
 
 sub new        # constructor, this method makes an object that belongs to class Number
 {
@@ -50,12 +52,11 @@ sub _getHeaders {
     return $headers;
 }
 
-
 sub _log($$)
 {
     my ( $self, $loglevel, $text ) = @_;
 
-    main::Log3("Hive", $loglevel, "HiveRest: ".$text);    
+    main::Log3("Hive", $loglevel, "HiveRest: ".$text);
 }
 
 sub connect {
@@ -67,15 +68,15 @@ sub connect {
     if (defined($sessionId)) 
     {
         # Test the provided session to see if it is valid.
-        if (!defined($self->sessionStatus($sessionId)))
+        if (!defined($self->_isTokenValid($sessionId)))
         {
             # Session has expired. Create a new session.
             $self->_log(3, "connect: Session has expired. requesting new one.");
-
             $sessionId = undef;
         }
         else
         {
+            $self->_log(3, "connect: Existing session is valid.");
             $self->{sessionId} = $sessionId;
         }
     }
@@ -101,44 +102,52 @@ sub connect {
     return $sessionId;
 }
 
-
 #############################
 # LOGIN to the Hive REST API
 #############################
 sub _login {
     my $self = shift;
-    my $username = shift;
+    my $userName = shift;
     my $password = shift;
-
-    my $sessions = {
-        sessions => [{
-                username => $username
-            ,   password => $password
-            ,   caller => 'WEB'
-        }]};
 
     $self->{sessionId} = undef;
 
-    $self->{client}->POST('/auth/sessions', encode_json($sessions), $self->_getHeaders());
+    my $sessions = {
+                username => $userName
+            ,   password => $password
 
-    if (200 != $self->{client}->responseCode()) {
+
+        };
+
+    my $headers = {
+             'Content-Type' => 'application/json'
+            , 'Accept' => 'application/json'
+            , 'X-Omnia-Client' => 'Hive Web Dashboard'
+    };
+
+    my $client = REST::Client->new();
+    $client->setHost('https://beekeeper.hivehome.com:443/1.0');
+
+    $client->POST('/cognito/login', encode_json($sessions), $headers);
+
+    if (200 != $client->responseCode()) {
         # Failed to connect to API
-            $self->_log(1, "Login: ".$self->{client}->responseContent());
+        $self->_log(1, "Login: ".$client->responseContent());
     } else {
+        my $response = from_json($client->responseContent());
 
-        my $response = from_json($self->{client}->responseContent());
-
+        if (defined $response->{user}) {
+            $self->{userId}           = $response->{user}{id};
+        }
         # Extract the session ID from the response...
-        if (defined $response->{sessions}) {
+        if (defined $response->{token}) {
+            $self->{sessionId}        = $response->{token};
 
-            $self->{sessionId}        = $response->{sessions}[0]{sessionId};
-            $self->{userId}           = $response->{sessions}[0]{userId};
-            $self->{latestApiVersion} = $response->{sessions}[0]{latestSupportedApiVersion};
 
         } else {
 
             # An error has occured
-            $self->_log(1, "Login: ".Dumper(from_json($self->{client}->responseContent())));
+            $self->_log(1, "Login: ".Dumper(from_json($client->responseContent())));
             # TODO: break down the error and only report the detail not the JSON
         }
     }
@@ -147,37 +156,57 @@ sub _login {
     return $self->{sessionId};
 }
 
-
-#############################
-# Check session status 
-# This also returns user permission details 
-#############################
-sub sessionStatus {
+#### 
+# Takes a JWT in its basic form as the input parameter, seperates the elements into 
+# header, claim and signature parts and then decodes the claim into a JSON object.
+# Returns: 
+#   undef if the claim cannot be extracted from the token
+#   the claim in JSON
+sub _getTokenClaim {
     my $self = shift;
-    my $sessionId = shift;
+    my $token = shift;
 
-    if (!defined($sessionId))
+    my $claimJSON = undef;
+
+    if (defined $token)
     {
-        $sessionId = $self->{sessionId};
+        my ($headerBase64, $claimBase64, $signatureBase64) = split(/[.]/, $token);
+
+        if (defined $claimBase64)
+        {
+            my $claimStr = MIME::Base64::decode_base64url($claimBase64);
+            $claimJSON = decode_json($claimStr);
+        }
     }
+    return $claimJSON;
+}
 
-    my $response = undef;
+#### 
+# Takes a JWT as the input parameter, decodes the claim element and checks the 'exp' element
+# against the current date/time.
+# Returns: 
+#   undef if the token is expired or invalid
+#   the expiry date/time epoch if the token is valid.
+sub _isTokenValid {
+    my $self = shift;
+    my $token = shift;
 
-    if ($sessionId)
+    my $expired = undef;
+
+    my $tokenClaim = $self->_getTokenClaim($token);
+    if (defined $tokenClaim)
     {
-        $self->{client}->GET('/auth/sessions/' . $sessionId, $self->_getHeaders($sessionId));
-        if (200 != $self->{client}->responseCode()) 
+        if (defined $tokenClaim->{exp})
         {
-            $self->_log(1, "sessionStatus: ".$self->{client}->responseContent());
-        } 
-        else 
-        {
-            $response = from_json($self->{client}->responseContent());
-#            $self->_log(3, "sessionStatus: ".Dumper($response));
+            my $currentTime = time;
+            if ($tokenClaim->{exp} > $currentTime)
+            {
+                $expired = $tokenClaim->{exp};
+            }
         }
     }
 
-    return $response;
+    return $expired;
 }
 
 ################################
@@ -188,18 +217,17 @@ sub logout {
 
     if ($self->{sessionId})
     {
-        $self->{client}->DELETE('/auth/sessions/' . $self->{sessionId}, $self->_getHeaders());
-        if (200 != $self->{client}->responseCode()) {
-            # Failed to connect to API
-            $self->_log(1, "Logout: ".$self->{client}->responseContent());
-        } else {
-            undef $self->{sessionId};
-        }
+#        $self->{client}->DELETE('/auth/sessions/' . $self->{sessionId}, $self->_getHeaders());
+#        if (200 != $self->{client}->responseCode()) {
+#            # Failed to connect to API
+#            $self->_log(1, "Logout: ".$self->{client}->responseContent());
+#        } else {
+#            undef $self->{sessionId};
+#        }
     }
 
     return $self->{sessionId};
 }
-
 
 sub _getNodeType {
     my $self = shift;
