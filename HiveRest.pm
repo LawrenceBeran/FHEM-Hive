@@ -53,15 +53,10 @@ sub _getHeaders {
 
 sub _log($$)
 {
-    my ( $loglevel, $text ) = @_;
+    my ( $self, $loglevel, $text ) = @_;
 
-    my $xline = (caller(0))[2];
-    my $xsubroutine = (caller(1))[3];
-    my $sub = (split( ':', $xsubroutine ))[2];
-
-    main::Log3("Hive", $loglevel, "$sub.$xline " . $text);
+    main::Log3("Hive", $loglevel, "HiveRest: ".$text);    
 }
-
 
 sub connect {
     my $self = shift;
