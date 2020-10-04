@@ -18,12 +18,11 @@ sub Hive_Hub_Send(@);
 
 #################################
 
-
 sub Hive_Hub_Initialize($)
 {
 	my ($hash) = @_;
 
-	Log(5, "Hive_Hub_Initialize: enter");
+	Log(3, "Hive_Hub_Initialize: enter");
 
 
 	# Provider
@@ -36,7 +35,7 @@ sub Hive_Hub_Initialize($)
 	$hash->{DefFn}    = "Hive_Hub_Define";
 	$hash->{UndefFn}  = "Hive_Hub_Undefine";
 	
-	Log(5, "Hive_Hub_Initialize: exit");
+	Log(3, "Hive_Hub_Initialize: exit");
 	return undef;	
 }
 
@@ -44,7 +43,7 @@ sub Hive_Hub_Define($$)
 {
 	my ($hash, $def) = @_;
 
-	Log(5, "Hive_Hub_Define: enter");
+	Log(3, "Hive_Hub_Define: enter");
 
 	my ($name, $type, $username, $password) = split(' ', $def);
 
@@ -63,7 +62,7 @@ sub Hive_Hub_Define($$)
 	# Create a timer to get object details
 	InternalTimer(gettimeofday()+1, "Hive_Hub_GetUpdate", $hash, 0);
 	
-	Log(5, "Hive_Hub_Define: exit");
+	Log(3, "Hive_Hub_Define: exit");
 
 	return undef;
 }
@@ -72,7 +71,7 @@ sub Hive_Hub_Undefine($$)
 {
 	my ($hash, $def) = @_;
 
-	Log(5, "Hive_Hub_Undefine: enter");
+	Log(3, "Hive_Hub_Undefine: enter");
 
 
 	if (defined($hash->{id})) {
@@ -88,7 +87,7 @@ sub Hive_Hub_Undefine($$)
 	$hiveClient->logout();
 	$hash->{HIVE}{SessionId} = undef;
 
-	Log(5, "Hive_Hub_Undefine: exit");
+	Log(3, "Hive_Hub_Undefine: exit");
 
 	return undef;
 }
@@ -102,7 +101,7 @@ Hive_Hub_UpdateNodes($$)
 {
 	my ($hash,$fromDefine) = @_;
 
-	Log(5, "Hive_Hub_UpdateNodes: enter");
+	Log(3, "Hive_Hub_UpdateNodes: enter");
 
 
 	my $presence = "ABSENT";
@@ -116,7 +115,7 @@ Hive_Hub_UpdateNodes($$)
 	} 
 	else 
 	{
-		Log(5, "Hive_Hub_UpdateNodes: $hash->{username} succesfully connected to Hive");
+		Log(3, "Hive_Hub_UpdateNodes: $hash->{username} succesfully connected to Hive");
 
 		$hash->{STATE} = "Connected";
 
@@ -232,7 +231,7 @@ Hive_Hub_UpdateNodes($$)
 	readingsBulkUpdateIfChanged($hash, "presence", uc $presence);
 	readingsEndUpdate($hash, 1);				
 
-	Log(5, "Hive_Hub_UpdateNodes: exit");
+	Log(3, "Hive_Hub_UpdateNodes: exit");
 }
 
 sub 
@@ -240,13 +239,13 @@ Hive_Hub_GetUpdate($)
 {
 	my ($hash) = @_;
 
-	Log(5, "Hive_Hub_GetUpdate: enter");
+	Log(3, "Hive_Hub_GetUpdate: enter");
 
 	Hive_Hub_UpdateNodes($hash, undef);
 	
 	InternalTimer(gettimeofday()+$hash->{INTERVAL}, "Hive_Hub_GetUpdate", $hash, 0);
 
-	Log(5, "Hive_Hub_GetUpdate: exit");
+	Log(3, "Hive_Hub_GetUpdate: exit");
 
 	return undef;
 }
@@ -262,11 +261,11 @@ sub Hive_Hub_Send(@)
 {
 	my ($hash, $dst, $cmd, @args) = @_;
 	
-	Log(5, "Hive_Hub_Send: enter");
+	Log(3, "Hive_Hub_Send: enter");
 
 	my $ret = undef;
 
-	Log(5, "Hive_Hub_Send: dst - $dst");
+	Log(3, "Hive_Hub_Send: dst - $dst");
 
 	my $hiveClient = HiveRest->new();
 	$hash->{HIVE}{SessionId} = $hiveClient->connect($hash->{username}, $hash->{password}, $hash->{HIVE}{SessionId});
@@ -842,7 +841,7 @@ sub Hive_Hub_Send(@)
 	#		Not sure when though as 5 seconds isnt enough for them to be updated
 	InternalTimer(gettimeofday()+2, "Hive_Hub_UpdateNodes", $hash, 0);
 	
-	Log(5, "Hive_Hub_Send: exit");
+	Log(3, "Hive_Hub_Send: exit");
 
 
 	return undef;
